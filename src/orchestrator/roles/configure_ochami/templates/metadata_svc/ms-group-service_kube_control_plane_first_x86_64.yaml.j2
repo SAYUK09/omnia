@@ -225,6 +225,11 @@
                   value: vip_interface
                 - name: vip_cidr
                   value: "{{ admin_netmask_bits }}"
+                # kube-vip renamed vip_cidr to vip_subnet in v1.x. v1.2.2 refuses to start
+                # with "vip_subnet must be set if using vip_address" when only vip_cidr is
+                # present. Emit both so the manifest works on v0.x and v1.x alike.
+                - name: vip_subnet
+                  value: "{{ admin_netmask_bits }}"
                 - name: dns_mode
                   value: first
                 - name: cp_enable
@@ -249,7 +254,7 @@
                   value: {{ kube_vip }}
                 - name: prometheus_server
                   value: :2112
-                image: ghcr.io/kube-vip/kube-vip:v0.8.9
+                image: {{ kube_vip_package }}:{{ kube_vip_tag }}
                 imagePullPolicy: IfNotPresent
                 name: kube-vip
                 resources: {}
@@ -501,8 +506,25 @@
             mv /tmp/ipaddress_pool.yaml {{ k8s_client_mount_path }}/metallb/ipaddress_pool.yaml
             mv /tmp/l2advertisement.yaml {{ k8s_client_mount_path }}/metallb/l2advertisement.yaml
             # Setup Kubernetes cluster
+            #
+            # /etc/kubernetes, /var/lib/kubelet and /var/lib/etcd are NFS mounts that outlive
+            # the node's ephemeral root, and kubelet is already running by this point. On a
+            # re-provision it resurrects the previous cluster's static pods before we get
+            # here, which holds ports 6443/2380 and keeps files busy, so the rm below fails
+            # with "Directory not empty" and kubeadm init then dies in preflight. Quiesce
+            # kubelet and crio first so the wipe can actually succeed.
+            #
+            # Stop crio rather than 'crictl rmp -fa': removing pods runs CNI DEL, which tears
+            # down Calico's host routes and can drop the node off the network mid-boot.
+            systemctl stop kubelet || true
+            systemctl stop crio || true
+            for _m in $(awk '$2 ~ "^/var/lib/kubelet/" {print $2}' /proc/mounts | sort -r); do
+              umount -l "$_m" || true
+            done
             rm -rf /var/lib/etcd/*  /var/lib/kubelet/* /etc/kubernetes/*
             rm -rf /var/lib/etcd/.*  /var/lib/kubelet/.* /etc/kubernetes/.*
+            systemctl start crio || true
+            systemctl start kubelet || true
             #!/bin/bash
             NODE_IP="{{ "{{" }} ds.meta_data.instance_data.v1.local_ipv4 {{ "}}" }}"
             # Find the interface with this IP

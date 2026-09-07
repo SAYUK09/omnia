@@ -67,10 +67,13 @@
   ansible.builtin.set_fact:
     target_fg_names: "{{ target_functional_groups | map(attribute='name') | list }}"
 
+- name: Reconcile mapping functional group names with the generated ones
+  ansible.builtin.include_tasks: resolve_effective_fg.yml
+
 - name: Compute filtered nodes for {{ target_category }}
   ansible.builtin.set_fact:
     _category_nodes: >-
-      {{ hostvars['localhost']['read_mapping_file']['dict'] | dict2items
+      {{ hostvars['localhost']['mapping_dict_effective'] | dict2items
          | selectattr('value.FUNCTIONAL_GROUP_NAME', 'in', target_fg_names)
          | map(attribute='value')
          | sort(attribute='XNAME')
@@ -317,9 +320,14 @@
   loop_control:
     label: "{{ item.id }}"
 
+# Preserve any existing per-FG content (mount_config populates .runcmd with the
+# storage_config fstab entries before this role runs). A plain combine({item: {}})
+# is non-recursive and would replace those entries with an empty dict.
 - name: Create metadata-service groups dict for target FGs
   ansible.builtin.set_fact:
-    metadata_svc_groups_dict: "{{ metadata_svc_groups_dict | default({}) | combine({item: {}}) }}"
+    metadata_svc_groups_dict: >-
+      {{ metadata_svc_groups_dict | default({})
+         | combine({item: (metadata_svc_groups_dict | default({}))[item] | default({})}) }}
   with_items: "{{ target_fg_names }}"
 
 - name: Create SMD groups for each target functional group

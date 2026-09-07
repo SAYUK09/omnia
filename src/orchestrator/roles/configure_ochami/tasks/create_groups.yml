@@ -23,7 +23,11 @@
     dest: "{{ nodes_dir }}/groups-{{ functional_group_name }}.yml"
     mode: "{{ hostvars['localhost']['file_permissions_644'] }}"
   vars:
-    smd_group_nodes: "{{ hostvars['localhost']['read_mapping_file']['dict'] | dict2items }}"
+    # Reconciled by provision_common/tasks/resolve_effective_fg.yml; the template filters
+    # on FUNCTIONAL_GROUP_NAME, so it needs the generated names, not the raw CSV ones.
+    smd_group_nodes: >-
+      {{ (hostvars['localhost']['mapping_dict_effective']
+          | default(hostvars['localhost']['read_mapping_file']['dict'])) | dict2items }}
 
 - name: Get SMD group data
   ansible.builtin.command: /usr/bin/ochami smd group get

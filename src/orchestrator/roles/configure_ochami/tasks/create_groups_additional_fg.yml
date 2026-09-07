@@ -27,7 +27,11 @@
     dest: "{{ nodes_dir }}/groups-{{ additional_metadata_svc_fg_smd_group_name }}.yml"
     mode: "{{ hostvars['localhost']['file_permissions_644'] }}"
   vars:
-    smd_group_nodes: "{{ hostvars['localhost']['read_mapping_file']['dict'] | dict2items }}"
+    # Reconciled by provision_common/tasks/resolve_effective_fg.yml; the template filters
+    # on FUNCTIONAL_GROUP_NAME, so it needs the generated names, not the raw CSV ones.
+    smd_group_nodes: >-
+      {{ (hostvars['localhost']['mapping_dict_effective']
+          | default(hostvars['localhost']['read_mapping_file']['dict'])) | dict2items }}
 
 - name: Delete SMD group - {{ additional_metadata_svc_fg_smd_group_name }}
   ansible.builtin.command: >-

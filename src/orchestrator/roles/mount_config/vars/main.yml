@@ -28,9 +28,13 @@ omnia_config_vars: "{{ hostvars['localhost']['omnia_project_input_dir'] }}/omnia
 omnia_run_tags: "{{ hostvars['localhost']['omnia_run_tags'] }}"
 
 # Usage: build_host_mount_map.yml
-# pxe_mapping_file_path  = omnia shared path + strip prefix /opt from hostvars['localhost']['pxe_mapping_file_path']
+# omnia-2.2 rebuilt this as oim_shared_path + (path minus its '/opt' prefix), because
+# oim_shared_path was then the parent of the omnia data dir. orchestrator_setup now sets
+# oim_shared_path to the data dir itself (see its "Set oim_shared_path fallback" task), so
+# that formula produced '/opt/omnia//omnia/orchestrator/...'. localhost already resolves
+# pxe_mapping_file_path to an absolute path on the OIM, so use it directly.
 omnia_shared_path: "{{ hostvars['localhost']['oim_shared_path'] }}"
-pxe_mapping_file_path: "{{ omnia_shared_path }}/{{ hostvars['localhost']['pxe_mapping_file_path'] | regex_replace('^/opt', '') }}"
+pxe_mapping_file_path: "{{ hostvars['localhost']['pxe_mapping_file_path'] }}"
 group_host_map: {}
 host_mount_map: {}
 ms_ds_dict:

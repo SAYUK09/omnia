@@ -27,7 +27,7 @@
     mode: "{{ file_permissions_644 }}"
   vars:
     smd_group_nodes: >-
-      {{ hostvars['localhost']['read_mapping_file']['dict'] | dict2items
+      {{ hostvars['localhost']['mapping_dict_effective'] | dict2items
          | selectattr('value.FUNCTIONAL_GROUP_NAME', 'in', target_fg_names)
          | list }}
 

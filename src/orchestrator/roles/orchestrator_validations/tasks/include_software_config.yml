@@ -40,6 +40,7 @@
     admin_nic: "{{ network_data.admin_network.oim_nic_name }}"
     admin_netmask_bits: "{{ network_data.admin_network.netmask_bits }}"
     ib_network_subnet: "{{ network_data.ib_network.subnet }}"
+    ib_network_netmask_bits: "{{ network_data.ib_network.netmask_bits | default('') }}"
     ib_network_dns: "{{ network_data.ib_network.dns | default([]) }}"
     dns: "{{ network_data.admin_network.dns }}"
 
@@ -48,35 +49,7 @@
     dns_enabled: false
   when: dns_enabled is not defined
 
-- name: Extract k8s version from catalog
-  ansible.builtin.set_fact:
-    service_k8s_version: >-
-      {% set fl_name = catalog_data.catalog.functionallayer
-         | selectattr('name', 'match', '.*kube.*|.*k8s.*')
-         | map(attribute='name')
-         | first
-         | default('') -%}
-      {% set fl_ver = fl_name | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+')
-         | default('', true) -%}
-      {% set pkg_ver = (catalog_data.catalog.packages.kubeadm.name
-         | default('')
-         | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+')
-         | default('', true))
-         if (catalog_data.catalog.packages is defined and
-             catalog_data.catalog.packages.kubeadm is defined)
-         else '' -%}
-      {% set ns = namespace(key_ver='') -%}
-      {% if not fl_ver and not pkg_ver and catalog_data.catalog.packages is defined -%}
-        {% for key in catalog_data.catalog.packages.keys() -%}
-          {% if not ns.key_ver and key is match('kubeadm.*|kubectl.*|kubelet.*') -%}
-            {% set ns.key_ver = catalog_data.catalog.packages[key].name
-               | default(key)
-               | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+')
-               | default('', true) -%}
-          {% endif -%}
-        {% endfor -%}
-      {% endif -%}
-      {{ fl_ver if fl_ver else (pkg_ver if pkg_ver else ns.key_ver) }}
-  when:
-    - service_k8s_support | default(false) | bool
-    - catalog_data is defined
+# service_k8s_version is derived from the catalog in orchestrator_setup, which
+# runs in every phase (precheck, provision, pxeboot, validate) and persists the
+# value to orchestrator_state.yml. This file only runs during precheck, so
+# deriving it here left it undefined for the provision playbooks.

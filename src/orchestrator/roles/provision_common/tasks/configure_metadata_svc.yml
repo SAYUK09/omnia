@@ -177,13 +177,22 @@
     k8s_nfs_server_path: "{{ (mounts | selectattr('name', 'equalto', service_k8s_cluster[0].nfs_storage_name) | first).source }}"
   when: target_category | default('') == 'kubernetes'
 
+# Calico's IP_AUTODETECTION_METHOD only accepts full CIDRs in its 'cidr=' list.
+# network_spec.yml stores ib_network.subnet ("192.168.0.0") and ib_network.netmask_bits
+# ("24") separately, so appending the bare subnet produced "cidr=10.49.2.0/24,192.168.0.0",
+# which Calico rejects: calico-node then fails IPv4 autodetection and crashloops, leaving
+# CNI uninstalled and coredns stuck in ContainerCreating. Join the two into a real CIDR
+# and drop the entry entirely if the netmask is missing rather than emitting a bad one.
 - name: Compute calico_cidr from network data
   ansible.builtin.set_fact:
     calico_cidr: >-
       {%- set ib_net = hostvars['localhost']['ib_network_subnet'] | default('') -%}
+      {%- set ib_bits = hostvars['localhost']['ib_network_netmask_bits'] | default('') -%}
       {%- set primary_net = (hostvars['localhost']['admin_nic_ip'] + '/' +
       hostvars['localhost']['admin_netmask_bits']) | ansible.utils.ipaddr('network/prefix') -%}
-      {%- if ib_net -%}{{ primary_net }},{{ ib_net }}{%- else -%}{{ primary_net }}{%- endif -%}
+      {%- if ib_net and ib_bits -%}
+      {{ primary_net }},{{ (ib_net ~ '/' ~ ib_bits) | ansible.utils.ipaddr('network/prefix') }}
+      {%- else -%}{{ primary_net }}{%- endif -%}
   when: target_category | default('') == 'kubernetes'
 
 - name: Load K8s packages JSON for template variables
@@ -263,6 +272,36 @@
              | selectattr('name', 'search', 'multus-daemonset')
              | map(attribute='name') | first | default('multus-daemonset-thick') }}
       when: not _k8s_pkg_stat.stat.exists
+
+    # The kube-vip static pod manifest is rendered from the FG template, which previously
+    # hardcoded the image tag. repo_manager mirrors into Pulp using the catalog's tag, so a
+    # hardcoded tag that disagrees with the catalog is never present in the mirror and the
+    # pod sits in ImagePullBackOff with "manifest unknown" (no egress to pull upstream).
+    - name: Extract kube-vip image and tag from catalog
+      ansible.builtin.set_fact:
+        kube_vip_package: >-
+          {{ hostvars['localhost']['catalog_data'].catalog.packages.values()
+             | selectattr('packagetype', 'defined')
+             | selectattr('packagetype', 'equalto', 'image')
+             | selectattr('name', 'search', 'kube-vip')
+             | map(attribute='name') | first | default('ghcr.io/kube-vip/kube-vip') }}
+        kube_vip_tag: >-
+          {{ hostvars['localhost']['catalog_data'].catalog.packages.values()
+             | selectattr('packagetype', 'defined')
+             | selectattr('packagetype', 'equalto', 'image')
+             | selectattr('name', 'search', 'kube-vip')
+             | map(attribute='tag') | first | default('') }}
+
+    - name: Fail when the kube-vip image tag cannot be resolved from the catalog
+      ansible.builtin.assert:
+        that:
+          - kube_vip_tag | default('') | trim | length > 0
+        fail_msg: >-
+          Could not resolve the kube-vip image tag from the catalog at
+          '{{ hostvars['localhost']['catalog_file_path'] | default('') }}'. Expected an
+          'image' package whose name matches 'kube-vip' and which carries a 'tag' field.
+          Regenerate the catalog with repo_manager.
+        quiet: true
 
 # ---- End K8s-specific variable setup ----
 

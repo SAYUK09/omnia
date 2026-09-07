@@ -15,12 +15,25 @@
 - name: Include storage_config.yml file
   ansible.builtin.include_vars: "{{ storage_config_vars }}"
 
+# Guarded so the runcmd entries are built once per run. Each provision playbook
+# (kubernetes, slurm, os, custom) invokes this role, but every invocation processes
+# all mounts for all functional groups. Without the guard the second invocation
+# would append duplicate fstab entries to functional groups rendered later.
 - name: Generate cloud-init mounts module compatible format form mounts
   ansible.builtin.include_tasks: cloud_init.yml
-  when: mount_config_mode | default('cloud-init') == 'cloud-init'
+  when:
+    - mount_config_mode | default('cloud-init') == 'cloud-init'
+    - mount_config_cloud_init_done is not defined
 
 - name: Generate cloud-init swap module compatible format from swap
   ansible.builtin.include_tasks: swap_config.yml
+  when:
+    - mount_config_mode | default('cloud-init') == 'cloud-init'
+    - mount_config_cloud_init_done is not defined
+
+- name: Mark cloud-init mount processing as complete
+  ansible.builtin.set_fact:
+    mount_config_cloud_init_done: true
   when: mount_config_mode | default('cloud-init') == 'cloud-init'
 
 - name: Initialize mount filter lists

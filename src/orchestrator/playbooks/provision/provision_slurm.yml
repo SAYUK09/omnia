@@ -54,6 +54,26 @@
         msg: "No functional groups match slurm category. Skipping."
       when: target_functional_groups | length == 0
 
+    - name: Load bolt-on configuration
+      ansible.builtin.set_fact:
+        category_bolt_ons: >-
+          {{ (omnia_config | default({})).get('orchestrator', {}).get('bolt_ons', {}).get('slurm',
+             default_bolt_ons.slurm) }}
+
+    # Must run before provision_common renders the metadata-service FG templates:
+    # it populates metadata_svc_groups_dict[<fg>].runcmd from storage_config.yml with
+    # the mount/swap/powervault fstab entries those templates iterate over. cloud-init
+    # mode also performs the OIM-side mount, so no separate oim-mount pass is needed.
+    - name: Configure mounts (cloud-init runcmd + OIM mount)
+      ansible.builtin.include_role:
+        name: mount_config
+      vars:
+        mount_config_mode: "cloud-init"
+      when:
+        - target_functional_groups | length > 0
+        - "'mount_config' in category_bolt_ons"
+        - not (hostvars['localhost']['upgrade_mode'] | default(false) | bool)
+
   roles:
     - role: provision_common
       when: target_functional_groups | length > 0
@@ -64,19 +84,6 @@
         - target_functional_groups | length > 0
         - not (hostvars['localhost']['upgrade_mode'] | default(false) | bool)
       block:
-        - name: Load bolt-on configuration
-          ansible.builtin.set_fact:
-            category_bolt_ons: >-
-              {{ (omnia_config | default({})).get('orchestrator', {}).get('bolt_ons', {}).get('slurm',
-                 default_bolt_ons.slurm) }}
-
-        - name: Configure mounts
-          ansible.builtin.include_role:
-            name: mount_config
-          vars:
-            mount_config_mode: "oim-mount"
-          when: "'mount_config' in category_bolt_ons"
-
         - name: Configure Slurm
           ansible.builtin.include_role:
             name: slurm_config

@@ -1,0 +1,74 @@
+#  Copyright 2026 Dell Inc. or its subsidiaries. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+---
+# Validate that the Kubernetes VIP and the MetalLB external IP pool are reachable.
+#
+# Both ship as 172.16.107.x placeholders in the input templates and are easy to leave
+# unedited. They are only consumed at node boot, so a wrong value is not noticed until
+# the cluster is half-built:
+#   - an off-subnet virtual_ip_address routes to the default gateway. The control-plane
+#     cloud-init rewrites admin.conf to point at it, so kubectl and every later step in
+#     the boot script fail against an unreachable endpoint.
+#   - an off-subnet pod_external_ip_range makes MetalLB hand out LoadBalancer IPs that
+#     nothing on the admin network can reach.
+# Fail here, at precheck, where the fix is a one-line edit.
+
+- name: Build admin network CIDR
+  ansible.builtin.set_fact:
+    _admin_subnet_cidr: >-
+      {{ (network_data.admin_network.subnet ~ '/' ~ network_data.admin_network.netmask_bits)
+         | ansible.utils.ipaddr('network/prefix') }}
+
+- name: Load high availability config
+  ansible.builtin.include_vars:
+    file: "{{ hostvars['localhost']['omnia_project_input_dir'] }}/high_availability_config.yml"
+  failed_when: false
+
+- name: Validate the Kubernetes virtual IP is inside the admin network
+  ansible.builtin.assert:
+    that:
+      - (_ha_vip | ansible.utils.ipaddr(_admin_subnet_cidr) | default('', true) | length) > 0
+    fail_msg: >-
+      virtual_ip_address '{{ _ha_vip }}' in high_availability_config.yml is not inside the
+      admin network {{ _admin_subnet_cidr }}. Set it to a free address on that network that
+      is outside the DHCP range
+      '{{ network_data.admin_network.dynamic_range | default("not set") }}'.
+    quiet: true
+  vars:
+    _ha_vip: "{{ service_k8s_cluster_ha[0].virtual_ip_address | default('') }}"
+  when:
+    - service_k8s_cluster_ha is defined
+    - service_k8s_cluster_ha | length > 0
+    - service_k8s_cluster_ha[0].enable_k8s_ha | default(false) | bool
+    - service_k8s_cluster_ha[0].virtual_ip_address | default('') | length > 0
+
+- name: Validate the MetalLB external IP range is inside the admin network
+  ansible.builtin.assert:
+    that:
+      - _pool_bounds | length == 2
+      - (_pool_bounds[0] | ansible.utils.ipaddr(_admin_subnet_cidr) | default('', true) | length) > 0
+      - (_pool_bounds[1] | ansible.utils.ipaddr(_admin_subnet_cidr) | default('', true) | length) > 0
+    fail_msg: >-
+      pod_external_ip_range '{{ _pool_raw }}' in omnia_config.yml is not inside the admin
+      network {{ _admin_subnet_cidr }}. MetalLB assigns LoadBalancer IPs from this range, so
+      it must be a free 'start-end' range on the admin network, outside the DHCP range
+      '{{ network_data.admin_network.dynamic_range | default("not set") }}'.
+    quiet: true
+  vars:
+    _pool_raw: "{{ service_k8s_cluster[0].pod_external_ip_range | default('') }}"
+    _pool_bounds: "{{ _pool_raw.split('-') | map('trim') | reject('equalto', '') | list }}"
+  when:
+    - service_k8s_cluster is defined
+    - service_k8s_cluster | length > 0
+    - service_k8s_cluster[0].pod_external_ip_range | default('') | length > 0

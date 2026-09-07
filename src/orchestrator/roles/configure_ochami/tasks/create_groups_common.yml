@@ -28,11 +28,13 @@
     # Use 'common_group_nodes' to avoid collision with the 'nodes' set_fact
     # from configure_boot_svc.yml.
     common_group_nodes: >-
-      {{ hostvars['localhost']['read_mapping_file']['dict'] | dict2items
+      {{ (hostvars['localhost']['mapping_dict_effective']
+          | default(hostvars['localhost']['read_mapping_file']['dict'])) | dict2items
          | selectattr('value.FUNCTIONAL_GROUP_NAME', 'in', target_fg_names | default([]))
          | list
          if (target_fg_names | default([]) | length > 0)
-         else hostvars['localhost']['read_mapping_file']['dict'] | dict2items }}
+         else (hostvars['localhost']['mapping_dict_effective']
+               | default(hostvars['localhost']['read_mapping_file']['dict'])) | dict2items }}
 
 - name: Delete the SMD common group - {{ common_group_name }}
   ansible.builtin.command: /usr/bin/ochami smd group delete --no-confirm {{ common_group_name }}

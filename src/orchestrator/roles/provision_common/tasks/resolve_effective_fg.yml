@@ -1,0 +1,57 @@
+#  Copyright 2026 Dell Inc. or its subsidiaries. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+---
+# Reconcile the mapping file's functional group names with the generated ones.
+#
+# generate_functional_groups.py renames the FIRST mapping row carrying
+# 'service_kube_control_plane_x86_64' to 'service_kube_control_plane_first_x86_64'
+# when it writes functional_groups_config.yml, so that the primary control plane
+# (which runs 'kubeadm init' rather than 'kubeadm join') can be targeted separately.
+#
+# pxe_mapping_file.csv keeps the original name, so every consumer that filters the
+# raw mapping rows against the generated functional group names silently dropped
+# that node: it was missing from nodes_<category>.yaml (never registered by
+# 'ochami discover static'), from hostname_<category>.yaml, and from its own SMD
+# group, whose members list came out empty.
+#
+# Produce one reconciled copy of the mapping dict on localhost, in the same shape
+# as read_mapping_file.dict, and have those consumers read it instead.
+
+- name: Identify the first kube control plane entry in mapping order
+  ansible.builtin.set_fact:
+    _first_cp_key: >-
+      {{ (hostvars['localhost']['read_mapping_file']['dict'] | dict2items
+          | selectattr('value.FUNCTIONAL_GROUP_NAME', 'equalto', kube_cp_fg_name)
+          | map(attribute='key') | list | first) | default('', true) }}
+
+- name: Build mapping dict with effective functional group names
+  ansible.builtin.set_fact:
+    mapping_dict_effective: >-
+      {{ hostvars['localhost']['read_mapping_file']['dict']
+         | combine({
+             _first_cp_key: hostvars['localhost']['read_mapping_file']['dict'][_first_cp_key]
+               | combine({'FUNCTIONAL_GROUP_NAME': kube_cp_first_fg_name})
+           })
+         if (_first_cp_key | length > 0)
+         else hostvars['localhost']['read_mapping_file']['dict'] }}
+  delegate_to: localhost
+  delegate_facts: true
+
+- name: Report the reconciled control plane entry
+  ansible.builtin.debug:
+    msg: >-
+      Mapping row '{{ _first_cp_key }}'
+      ({{ hostvars['localhost']['mapping_dict_effective'][_first_cp_key].HOSTNAME | default('unknown') }})
+      resolved to functional group '{{ kube_cp_first_fg_name }}'.
+  when: _first_cp_key | length > 0

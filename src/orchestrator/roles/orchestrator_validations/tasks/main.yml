@@ -38,6 +38,10 @@
   ansible.builtin.include_tasks: validate_mapping_file.yml
   when: mapping_file_status
 
+- name: Validate Kubernetes VIP and external IP pool
+  ansible.builtin.include_tasks: validate_k8s_network_config.yml
+  when: hostvars['localhost']['service_k8s_support'] | default(false) | bool
+
 - name: Validate NFS storage configuration
   ansible.builtin.include_tasks: validate_storage_config.yml
   when: (hostvars['localhost']['slurm_support'] | default(false) | bool) or
